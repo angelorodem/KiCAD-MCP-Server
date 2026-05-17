@@ -199,6 +199,58 @@ For any MCP-compatible client that supports STDIO transport:
 }
 ```
 
+### Profile Selection
+
+The server supports three exposure profiles:
+
+- `full` - default, complete tool surface
+- `schematic` - schematic-first MCP surface
+- `pcb` - PCB-first MCP surface
+
+Choose one of these methods:
+
+```json
+{
+  "command": "node",
+  "args": ["/path/to/KiCAD-MCP-Server/dist/index.js", "--profile", "schematic"],
+  "transport": "stdio"
+}
+```
+
+```json
+{
+  "command": "node",
+  "args": ["/path/to/KiCAD-MCP-Server/dist/index.js"],
+  "transport": "stdio",
+  "env": {
+    "KICAD_MCP_PROFILE": "pcb"
+  }
+}
+```
+
+If you already use a config file, add `"profile": "full"`, `"schematic"`, or `"pcb"` there. Precedence is CLI, then environment, then config file, then the default `full` profile.
+
+### Running Separate Schematic and PCB Entries
+
+For clients that support multiple MCP entries, a practical setup is to expose two server entries that point to the same build with different profiles:
+
+```json
+{
+  "mcpServers": {
+    "kicad-schematic": {
+      "command": "node",
+      "args": ["/path/to/KiCAD-MCP-Server/dist/index.js", "--profile", "schematic"]
+    },
+    "kicad-pcb": {
+      "command": "node",
+      "args": ["/path/to/KiCAD-MCP-Server/dist/index.js", "--profile", "pcb"]
+    }
+  }
+}
+```
+
+Each MCP entry starts its own Python subprocess. They can point at the same project files, but they do not share in-memory board state.
+
 ---
 
 ## Environment Variables
@@ -214,6 +266,7 @@ For any MCP-compatible client that supports STDIO transport:
 | Variable          | Description                                       | Default        |
 | ----------------- | ------------------------------------------------- | -------------- |
 | `LOG_LEVEL`       | Logging verbosity                                 | `info`         |
+| `KICAD_MCP_PROFILE` | MCP exposure profile (`full`, `schematic`, `pcb`) | `full`         |
 | `NODE_ENV`        | Node environment                                  | `development`  |
 | `KICAD_BACKEND`   | Force backend (`swig` or `ipc`)                   | Auto-detect    |
 | `KICAD_MCP_DEV`   | Enable developer mode (auto-save logs to project) | `0` (disabled) |

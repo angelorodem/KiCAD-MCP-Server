@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { KiCADMcpServer } from "./server.js";
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
+import { McpProfile, MCP_PROFILE_VALUES, parseMcpProfile } from "./profiles.js";
 
 // Get the current directory
 const __filename = fileURLToPath(import.meta.url);
@@ -24,12 +25,13 @@ async function main() {
 
     // Load configuration
     const config = await loadConfig(options.configPath);
+    const profile = options.profile ?? config.profile;
 
     // Path to the Python script that interfaces with KiCAD
     const kicadScriptPath = join(dirname(__dirname), "python", "kicad_interface.py");
 
     // Create the server
-    const server = new KiCADMcpServer(kicadScriptPath, config.logLevel);
+    const server = new KiCADMcpServer(kicadScriptPath, config.logLevel, profile);
 
     // Start the server
     await server.start();
@@ -37,11 +39,23 @@ async function main() {
     // Setup graceful shutdown
     setupGracefulShutdown(server);
 
-    logger.info("KiCAD MCP server started with STDIO transport");
+    logger.info(`KiCAD MCP server started with STDIO transport (${profile} profile)`);
   } catch (error) {
     logger.error(`Failed to start KiCAD MCP server: ${error}`);
     process.exit(1);
   }
+}
+
+function isEntryPoint(): boolean {
+  const entryPath = process.argv[1];
+  if (!entryPath) {
+    return false;
+  }
+
+  const normalizedEntryPath = process.platform === "win32" ? entryPath.toLowerCase() : entryPath;
+  const normalizedModulePath = process.platform === "win32" ? __filename.toLowerCase() : __filename;
+
+  return normalizedEntryPath === normalizedModulePath;
 }
 
 /**
@@ -49,15 +63,30 @@ async function main() {
  */
 function parseCommandLineArgs(args: string[]) {
   let configPath = undefined;
+  let profile: McpProfile | undefined = undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--config" && i + 1 < args.length) {
       configPath = args[i + 1];
       i++;
+      continue;
+    }
+
+    if (args[i] === "--profile" && i + 1 < args.length) {
+      const rawProfile = args[i + 1];
+      const parsedProfile = parseMcpProfile(rawProfile);
+      if (!parsedProfile) {
+        throw new Error(
+          `Invalid --profile value: ${rawProfile}. Expected one of: ${MCP_PROFILE_VALUES.join(", ")}`,
+        );
+      }
+
+      profile = parsedProfile;
+      i++;
     }
   }
 
-  return { configPath };
+  return { configPath, profile };
 }
 
 /**
@@ -103,12 +132,12 @@ async function shutdownServer(server: KiCADMcpServer) {
   }
 }
 
-// Run the main function - always run when imported as module entry point
-// The import.meta.url check was failing on Windows due to path separators
-main().catch((error) => {
-  console.error(`Unhandled error in main: ${error}`);
-  process.exit(1);
-});
+if (isEntryPoint()) {
+  main().catch((error) => {
+    console.error(`Unhandled error in main: ${error}`);
+    process.exit(1);
+  });
+}
 
 // For testing and programmatic usage
-export { KiCADMcpServer };
+export { KiCADMcpServer, main };

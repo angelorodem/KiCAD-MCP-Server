@@ -1,18 +1,31 @@
 # KiCAD MCP Server - Complete Tool Inventory
 
-**Version:** 2.1.0-alpha
-**Total Tools:** 137 (verifiziert via VS Code MCP Discovery Log)
-**Last Updated:** 2026-05-02
+**Scope:** This document describes the complete `full` profile tool surface.
+**Last Updated:** 2026-05-17
+
+## Profile Availability Summary
+
+The server can expose narrower MCP surfaces with the `schematic` and `pcb` profiles.
+
+| Area | Profiles |
+| ---- | -------- |
+| Project management and UI | `full`, `schematic`, `pcb` |
+| Board, PCB component, routing, DRC, export, footprint, Freerouting | `full`, `pcb` |
+| Schematic editing, symbol libraries, symbol creation | `full`, `schematic` |
+| `sync_schematic_to_board` | `full`, `pcb` |
+| JLCPCB and datasheet enrichment | `full` |
 
 ## How Tools Are Organized
 
-Tools are registered directly via `server.tool()`
+Tools are registered directly via `server.tool()`.
 
-The `Access` column below uses legacy labels from when a router pattern was planned:
+The `Access` column below uses the current discovery model:
 
-- **Direct** — High-frequency tools, originally intended as always-visible
-- **Routed** — Originally planned for router dispatch; now also registered directly
-- **Additional** — Registered directly (always visible)
+- **Direct** — High-frequency tools highlighted by the registry and router metadata
+- **Routed** — Tools grouped into router discovery categories; still called directly by tool name
+- **Additional** — Registered directly and not part of the routed discovery categories
+
+The router is discovery-only. The live server does not expose `execute_tool`.
 
 ---
 
@@ -218,6 +231,8 @@ _Source: `src/tools/schematic.ts`_
 | `run_erc`                 | Run electrical rule check                             | Additional         |
 | `generate_netlist`        | Generate netlist from schematic                       | Routed (schematic) |
 | `sync_schematic_to_board` | Sync schematic components/nets to PCB (F8 equivalent) | Direct             |
+
+`sync_schematic_to_board` is intentionally excluded from the `schematic` profile and remains available in `full` and `pcb`.
 
 ---
 

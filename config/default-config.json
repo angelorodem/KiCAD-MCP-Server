@@ -5,5 +5,6 @@
   "pythonPath": "",
   "kicadPath": "",
   "logLevel": "info",
+  "profile": "full",
   "logDir": ""
 }

@@ -8,6 +8,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 import { logger } from "./logger.js";
+import { DEFAULT_MCP_PROFILE, MCP_PROFILE_VALUES, parseMcpProfile } from "./profiles.js";
 
 // Get the current directory
 const __filename = fileURLToPath(import.meta.url);
@@ -17,6 +18,7 @@ const __dirname = dirname(__filename);
 const DEFAULT_CONFIG_PATH = join(dirname(__dirname), "config", "default-config.json");
 const LOG_LEVEL_VALUES = ["error", "warn", "info", "debug"] as const;
 const LogLevelSchema = z.enum(LOG_LEVEL_VALUES);
+const ProfileSchema = z.enum(MCP_PROFILE_VALUES);
 
 /**
  * Server configuration schema
@@ -28,6 +30,7 @@ const ConfigSchema = z.object({
   pythonPath: z.string().optional(),
   kicadPath: z.string().optional(),
   logLevel: LogLevelSchema.default("info"),
+  profile: ProfileSchema.default(DEFAULT_MCP_PROFILE),
   logDir: z.string().optional(),
 });
 
@@ -60,12 +63,36 @@ function getEnvLogLevel(): Config["logLevel"] | undefined {
   return undefined;
 }
 
+function getEnvProfile(): Config["profile"] | undefined {
+  const rawProfile = process.env.KICAD_MCP_PROFILE;
+  if (!rawProfile) {
+    return undefined;
+  }
+
+  const parsed = parseMcpProfile(rawProfile);
+  if (parsed) {
+    return parsed;
+  }
+
+  logger.warn(
+    `Ignoring invalid KICAD_MCP_PROFILE value: ${rawProfile}. Expected one of: ${MCP_PROFILE_VALUES.join(", ")}`,
+  );
+  return undefined;
+}
+
 function applyEnvironmentOverrides(config: Config): Config {
   const envLogLevel = getEnvLogLevel();
-  if (!envLogLevel) {
+  const envProfile = getEnvProfile();
+
+  if (!envLogLevel && !envProfile) {
     return config;
   }
-  return { ...config, logLevel: envLogLevel };
+
+  return {
+    ...config,
+    logLevel: envLogLevel ?? config.logLevel,
+    profile: envProfile ?? config.profile,
+  };
 }
 
 /**

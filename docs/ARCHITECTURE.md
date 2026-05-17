@@ -110,8 +110,8 @@ KiCAD-MCP-Server/
 ### Server Startup (`src/server.ts`)
 
 1. Creates an MCP server instance
-2. Registers all tools from each tool file (registerProjectTools, registerBoardTools, etc.)
-3. Registers resources and prompts
+2. Registers tools, resources, and prompts according to the active exposure profile (`full`, `schematic`, or `pcb`)
+3. Passes the active profile into router discovery so tool categories and search results match the registered MCP surface
 4. Starts the STDIO transport for MCP communication
 5. On first tool call, spawns the Python subprocess
 
@@ -138,11 +138,12 @@ server.tool(
 
 ### Tool Router (`src/tools/router.ts` and `src/tools/registry.ts`)
 
-The router pattern reduces AI context usage:
+The router is a discovery layer, not an execution gateway:
 
-- `registry.ts` defines tool categories and which tools are "direct" (always visible) vs "routed" (discoverable)
-- `router.ts` provides 4 meta-tools: `list_tool_categories`, `get_category_tools`, `search_tools`, `execute_tool`
-- Routed tools are not registered as individual MCP tools -- they are invoked through `execute_tool`
+- `registry.ts` defines tool categories and which tools are highlighted as direct vs routed discovery items
+- `router.ts` provides 3 discovery tools: `list_tool_categories`, `get_category_tools`, and `search_tools`
+- Tools are still registered as individual MCP tools when the active profile allows them; clients call those tool names directly
+- Profile-aware filtering lives in both `src/server.ts` and the registry/router metadata so the advertised discovery surface matches the registered one
 
 ### Python Subprocess Communication
 

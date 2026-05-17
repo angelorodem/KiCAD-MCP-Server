@@ -12,8 +12,9 @@ The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standa
 
 **Key Capabilities:**
 
-- 122 tools across 16 categories with JSON Schema validation
+- Large tool surface with JSON Schema validation across project, schematic, PCB, library, export, sourcing, and automation workflows
 - Smart tool discovery with router pattern (reduces AI context by 70%)
+- Profile-based MCP exposure: `full`, `schematic`, and `pcb`
 - 8 dynamic resources exposing project state
 - Complete schematic workflow with 27 tools and dynamic symbol loading (~10,000 symbols)
 - Freerouting autorouter integration (Java, Docker, or Podman)
@@ -177,16 +178,33 @@ Note: IPC features are under active development and testing. Enable IPC in KiCAD
 
 We've implemented an intelligent tool router to keep AI context efficient while maintaining full functionality:
 
-- **18 direct tools** always visible for high-frequency operations
-- **65 routed tools** organized into 8 categories (board, component, export, drc, schematic, library, routing, autoroute)
-- **35 additional tools** always visible (symbol/footprint creators, JLCPCB, datasheet, advanced routing)
-- **4 router tools** for discovery and execution:
+- Direct tools remain visible for high-frequency operations
+- Routed tools are organized into 8 discovery categories: board, component, export, drc, schematic, library, routing, and autoroute
+- Additional specialized tools stay available outside the routed categories, including symbol/footprint creation, JLCPCB, datasheet, and advanced workflow helpers
+- **3 router tools** for discovery:
   - `list_tool_categories` - Browse all available categories
   - `get_category_tools` - View tools in a specific category
   - `search_tools` - Find tools by keyword
-  - `execute_tool` - Run any tool with parameters
 
-**Why this matters:** By organizing tools into discoverable categories, Claude can intelligently find and use the right tool for your task without loading all 122 tool schemas into every conversation. This reduces context consumption while maintaining full access to all functionality.
+Router tools are discovery helpers only. The live server registers callable MCP tools directly; once you know the tool name, call that tool by name.
+
+### Exposure Profiles
+
+The TypeScript server can now expose different MCP surfaces from the same backend:
+
+- `full` - default behavior; exposes the complete tool surface
+- `schematic` - narrows MCP exposure to schematic-first workflows and shared project/UI tools
+- `pcb` - narrows MCP exposure to PCB layout, routing, fabrication, and shared project/UI tools
+
+Use one of these selectors:
+
+- CLI: `node dist/index.js --profile schematic`
+- Environment: `KICAD_MCP_PROFILE=pcb`
+- Config file: set `"profile": "full" | "schematic" | "pcb"`
+
+Precedence is CLI, then environment, then config file, then the default `full` profile.
+
+**Why this matters:** Tool clutter reduction now comes from profile-based registration in the TypeScript server. `schematic` and `pcb` expose smaller MCP surfaces, while the router helps clients navigate the active profile instead of acting as an execution layer.
 
 **Usage is seamless:** Just ask naturally - "export gerber files" or "add mounting holes" - and Claude will discover and execute the appropriate tools automatically.
 
@@ -248,7 +266,9 @@ Access project state without executing tools:
 
 ## Available Tools
 
-The server provides **122 tools** organized into 16 functional categories. With the router pattern, tools are automatically discovered as needed -- just ask Claude what you want to accomplish.
+The server provides a broad KiCAD automation surface across project setup, schematic editing, PCB layout, export, sourcing, and supporting workflows. With the router pattern, tools are automatically discovered as needed -- just ask Claude what you want to accomplish.
+
+If you want a narrower MCP surface, run the server in the `schematic` or `pcb` profile instead of the default `full` profile.
 
 For the complete tool reference with access types (direct/routed/additional), see [Tool Inventory](docs/TOOL_INVENTORY.md).
 
@@ -1097,7 +1117,7 @@ npm run format
 
 See [STATUS_SUMMARY.md](docs/STATUS_SUMMARY.md) for the complete status matrix and [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-**Working Features (122 tools):**
+**Working Features:**
 
 - Project management with snapshot checkpointing
 - Complete board design (outline, layers, zones, mounting holes, text, SVG logos)

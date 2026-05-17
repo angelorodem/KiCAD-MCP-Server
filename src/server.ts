@@ -4,11 +4,16 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import express from "express";
 import { spawn, exec, execSync, ChildProcess } from "child_process";
 import { existsSync } from "fs";
 import { join, dirname } from "path";
 import { logger } from "./logger.js";
+import {
+  DEFAULT_MCP_PROFILE,
+  McpProfile,
+  supportsPcbTools,
+  supportsSchematicTools,
+} from "./profiles.js";
 
 // Import tool registration functions
 import { registerProjectTools } from "./tools/project.js";
@@ -137,7 +142,7 @@ function findPythonExecutable(scriptPath: string): string {
         logger.info(`Resolved system Python via which: ${result}`);
         return result;
       }
-    } catch (e) {
+    } catch {
       logger.warn("Failed to resolve python3 via which command");
     }
 
@@ -156,6 +161,17 @@ function findPythonExecutable(scriptPath: string): string {
   return isWindows ? "python.exe" : "python3";
 }
 
+type CommandFunction = (command: string, params: Record<string, unknown>) => Promise<any>;
+
+type ToolRegistrationFunction = (server: McpServer, callKicadScript: CommandFunction) => void;
+type ResourceRegistrationFunction = (server: McpServer, callKicadScript: CommandFunction) => void;
+type PromptRegistrationFunction = (server: McpServer) => void;
+
+interface RegistrationNameFilter {
+  allowedNames?: ReadonlySet<string>;
+  blockedNames?: ReadonlySet<string>;
+}
+
 /**
  * KiCAD MCP Server class
  */
@@ -171,6 +187,7 @@ export class KiCADMcpServer {
   }> = [];
   private processingRequest = false;
   private responseBuffer: string = "";
+  private readonly profile: McpProfile;
   private currentRequestHandler: {
     resolve: Function;
     reject: Function;
@@ -181,8 +198,13 @@ export class KiCADMcpServer {
    * Constructor for the KiCAD MCP Server
    * @param kicadScriptPath Path to the Python KiCAD interface script
    * @param logLevel Log level for the server
+   * @param profile Tool exposure profile for this MCP server instance
    */
-  constructor(kicadScriptPath: string, logLevel: "error" | "warn" | "info" | "debug" = "info") {
+  constructor(
+    kicadScriptPath: string,
+    logLevel: "error" | "warn" | "info" | "debug" = "info",
+    profile: McpProfile = DEFAULT_MCP_PROFILE,
+  ) {
     // Set up the logger
     logger.setLogLevel(logLevel);
 
@@ -191,6 +213,8 @@ export class KiCADMcpServer {
     if (!existsSync(this.kicadScriptPath)) {
       throw new Error(`KiCAD interface script not found: ${this.kicadScriptPath}`);
     }
+
+    this.profile = profile;
 
     // Initialize the MCP server
     this.server = new McpServer({
@@ -211,41 +235,176 @@ export class KiCADMcpServer {
    * Register all tools, resources, and prompts
    */
   private registerAll(): void {
-    logger.info("Registering KiCAD tools, resources, and prompts...");
+    logger.info(`Registering KiCAD tools, resources, and prompts for ${this.profile} profile...`);
+
+    const callKicadScript = this.callKicadScript.bind(this);
 
     // Register router tools FIRST (for tool discovery and execution)
-    registerRouterTools(this.server, this.callKicadScript.bind(this));
+    registerRouterTools(this.server, callKicadScript, this.profile);
 
-    // Register all tools
-    registerProjectTools(this.server, this.callKicadScript.bind(this));
-    registerBoardTools(this.server, this.callKicadScript.bind(this));
-    registerComponentTools(this.server, this.callKicadScript.bind(this));
-    registerRoutingTools(this.server, this.callKicadScript.bind(this));
-    registerDesignRuleTools(this.server, this.callKicadScript.bind(this));
-    registerExportTools(this.server, this.callKicadScript.bind(this));
-    registerSchematicTools(this.server, this.callKicadScript.bind(this));
-    registerLibraryTools(this.server, this.callKicadScript.bind(this));
-    registerSymbolLibraryTools(this.server, this.callKicadScript.bind(this));
-    registerJLCPCBApiTools(this.server, this.callKicadScript.bind(this));
-    registerDatasheetTools(this.server, this.callKicadScript.bind(this));
-    registerFootprintTools(this.server, this.callKicadScript.bind(this));
-    registerSymbolCreatorTools(this.server, this.callKicadScript.bind(this));
-    registerUITools(this.server, this.callKicadScript.bind(this));
-    registerFreeroutingTools(this.server, this.callKicadScript.bind(this));
+    // Register tools shared across all profiles
+    this.registerToolGroup(registerProjectTools, callKicadScript);
+    this.registerToolGroup(registerUITools, callKicadScript);
+
+    if (supportsPcbTools(this.profile)) {
+      this.registerToolGroup(registerBoardTools, callKicadScript);
+      this.registerToolGroup(registerComponentTools, callKicadScript);
+      this.registerToolGroup(registerRoutingTools, callKicadScript);
+      this.registerToolGroup(registerDesignRuleTools, callKicadScript);
+      this.registerToolGroup(registerExportTools, callKicadScript);
+      this.registerToolGroup(registerLibraryTools, callKicadScript);
+      this.registerToolGroup(registerFootprintTools, callKicadScript);
+      this.registerToolGroup(registerFreeroutingTools, callKicadScript);
+    }
+
+    if (supportsSchematicTools(this.profile)) {
+      this.registerToolGroup(
+        registerSchematicTools,
+        callKicadScript,
+        this.profile === "schematic"
+          ? { blockedNames: new Set(["sync_schematic_to_board"]) }
+          : undefined,
+      );
+      this.registerToolGroup(registerSymbolLibraryTools, callKicadScript);
+      this.registerToolGroup(registerSymbolCreatorTools, callKicadScript);
+    } else {
+      this.registerToolGroup(registerSchematicTools, callKicadScript, {
+        allowedNames: new Set(["sync_schematic_to_board"]),
+      });
+    }
+
+    if (this.profile === "full") {
+      this.registerToolGroup(registerJLCPCBApiTools, callKicadScript);
+      this.registerToolGroup(registerDatasheetTools, callKicadScript);
+    }
 
     // Register all resources
-    registerProjectResources(this.server, this.callKicadScript.bind(this));
-    registerBoardResources(this.server, this.callKicadScript.bind(this));
-    registerComponentResources(this.server, this.callKicadScript.bind(this));
-    registerLibraryResources(this.server, this.callKicadScript.bind(this));
+    this.registerResourceGroup(
+      registerProjectResources,
+      callKicadScript,
+      this.profile === "schematic" ? { blockedNames: new Set(["project_summary"]) } : undefined,
+    );
+    if (supportsPcbTools(this.profile)) {
+      this.registerResourceGroup(registerBoardResources, callKicadScript);
+      this.registerResourceGroup(registerComponentResources, callKicadScript);
+    }
+    this.registerResourceGroup(registerLibraryResources, callKicadScript);
 
     // Register all prompts
-    registerComponentPrompts(this.server);
-    registerRoutingPrompts(this.server);
-    registerDesignPrompts(this.server);
-    registerFootprintPrompts(this.server);
+    this.registerPromptGroup(
+      registerComponentPrompts,
+      this.profile === "schematic"
+        ? { blockedNames: new Set(["component_placement_strategy"]) }
+        : this.profile === "pcb"
+          ? { blockedNames: new Set(["component_sourcing_properties"]) }
+          : undefined,
+    );
+    if (supportsPcbTools(this.profile)) {
+      this.registerPromptGroup(registerRoutingPrompts);
+      this.registerPromptGroup(registerDesignPrompts);
+      this.registerPromptGroup(registerFootprintPrompts);
+    }
 
-    logger.info("All KiCAD tools, resources, and prompts registered");
+    logger.info(`KiCAD tools, resources, and prompts registered for ${this.profile} profile`);
+  }
+
+  private registerToolGroup(
+    registerTools: ToolRegistrationFunction,
+    callKicadScript: CommandFunction,
+    filter?: RegistrationNameFilter,
+  ): void {
+    registerTools(this.createFilteredToolServer(filter), callKicadScript);
+  }
+
+  private registerResourceGroup(
+    registerResources: ResourceRegistrationFunction,
+    callKicadScript: CommandFunction,
+    filter?: RegistrationNameFilter,
+  ): void {
+    registerResources(this.createFilteredResourceServer(filter), callKicadScript);
+  }
+
+  private registerPromptGroup(
+    registerPrompts: PromptRegistrationFunction,
+    filter?: RegistrationNameFilter,
+  ): void {
+    registerPrompts(this.createFilteredPromptServer(filter));
+  }
+
+  private createFilteredToolServer(filter?: RegistrationNameFilter): McpServer {
+    if (!filter?.allowedNames && !filter?.blockedNames) {
+      return this.server;
+    }
+
+    const baseServer = this.server;
+    const filteredServer = Object.create(baseServer) as McpServer;
+
+    filteredServer.tool = ((name: string, ...args: unknown[]) => {
+      if (!this.shouldRegisterName(name, filter)) {
+        logger.debug(`Skipping tool registration for ${name} in ${this.profile} profile`);
+        return filteredServer;
+      }
+
+      return (baseServer.tool as (...toolArgs: unknown[]) => unknown).call(baseServer, name, ...args);
+    }) as typeof baseServer.tool;
+
+    return filteredServer;
+  }
+
+  private createFilteredResourceServer(filter?: RegistrationNameFilter): McpServer {
+    if (!filter?.allowedNames && !filter?.blockedNames) {
+      return this.server;
+    }
+
+    const baseServer = this.server;
+    const filteredServer = Object.create(baseServer) as McpServer;
+
+    filteredServer.resource = ((name: string, ...args: unknown[]) => {
+      if (!this.shouldRegisterName(name, filter)) {
+        logger.debug(`Skipping resource registration for ${name} in ${this.profile} profile`);
+        return filteredServer;
+      }
+
+      return (baseServer.resource as (...resourceArgs: unknown[]) => unknown).call(
+        baseServer,
+        name,
+        ...args,
+      );
+    }) as typeof baseServer.resource;
+
+    return filteredServer;
+  }
+
+  private createFilteredPromptServer(filter?: RegistrationNameFilter): McpServer {
+    if (!filter?.allowedNames && !filter?.blockedNames) {
+      return this.server;
+    }
+
+    const baseServer = this.server;
+    const filteredServer = Object.create(baseServer) as McpServer;
+
+    filteredServer.prompt = ((name: string, ...args: unknown[]) => {
+      if (!this.shouldRegisterName(name, filter)) {
+        logger.debug(`Skipping prompt registration for ${name} in ${this.profile} profile`);
+        return filteredServer;
+      }
+
+      return (baseServer.prompt as (...promptArgs: unknown[]) => unknown).call(baseServer, name, ...args);
+    }) as typeof baseServer.prompt;
+
+    return filteredServer;
+  }
+
+  private shouldRegisterName(name: string, filter: RegistrationNameFilter): boolean {
+    if (filter.allowedNames && !filter.allowedNames.has(name)) {
+      return false;
+    }
+
+    if (filter.blockedNames?.has(name)) {
+      return false;
+    }
+
+    return true;
   }
 
   /**

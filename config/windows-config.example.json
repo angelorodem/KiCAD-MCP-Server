@@ -2,7 +2,7 @@
   "mcpServers": {
     "kicad": {
       "command": "node",
-      "args": ["C:\\Users\\YOUR_USERNAME\\MCP\\KiCAD-MCP-Server\\dist\\index.js"],
+      "args": ["C:\\Users\\YOUR_USERNAME\\MCP\\KiCAD-MCP-Server\\dist\\index.js", "--profile", "full"],
       "env": {
         "NODE_ENV": "production",
         "PYTHONPATH": "C:\\Program Files\\KiCad\\9.0\\bin\\Lib\\site-packages",
@@ -10,7 +10,7 @@
         "KICAD_AUTO_LAUNCH": "false",
         "KICAD_MCP_DEV": "0"
       },
-      "description": "KiCAD PCB Design Assistant - Note: PYTHONPATH auto-detected if venv exists"
+      "description": "KiCAD PCB Design Assistant - change --profile to schematic or pcb to reduce tool clutter"
     }
   }
 }

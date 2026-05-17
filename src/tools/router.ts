@@ -7,11 +7,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
+import { DEFAULT_MCP_PROFILE, McpProfile } from "../profiles.js";
 import {
-  getAllCategories,
   getCategory,
-  searchTools as registrySearchTools,
-  getRegistryStats,
+  getAllCategoriesForProfile,
+  getCategoryForProfile,
+  searchToolsForProfile,
+  getRegistryStatsForProfile,
 } from "./registry.js";
 
 // Command function type for KiCAD script calls
@@ -20,7 +22,11 @@ type CommandFunction = (command: string, params: Record<string, unknown>) => Pro
 /**
  * Register all router tools with the MCP server
  */
-export function registerRouterTools(server: McpServer, _callKicadScript: CommandFunction): void {
+export function registerRouterTools(
+  server: McpServer,
+  _callKicadScript: CommandFunction,
+  profile: McpProfile = DEFAULT_MCP_PROFILE,
+): void {
   logger.info("Registering router tools");
 
   // ============================================================================
@@ -35,14 +41,15 @@ export function registerRouterTools(server: McpServer, _callKicadScript: Command
     async () => {
       logger.debug("Listing tool categories");
 
-      const stats = getRegistryStats();
-      const categories = getAllCategories();
+      const stats = getRegistryStatsForProfile(profile);
+      const categories = getAllCategoriesForProfile(profile);
 
       const result = {
+        profile,
         total_categories: stats.total_categories,
         total_routed_tools: stats.total_routed_tools,
         total_direct_tools: stats.total_direct_tools,
-        note: "Use get_category_tools to see tools in each category. Direct tools are always available.",
+        note: "Use get_category_tools to see tools in each category. Direct tools are available in the active profile and can be called directly by name.",
         categories: categories.map((c) => ({
           name: c.name,
           description: c.description,
@@ -73,18 +80,22 @@ export function registerRouterTools(server: McpServer, _callKicadScript: Command
     async ({ category }) => {
       logger.debug(`Getting tools for category: ${category}`);
 
-      const categoryData = getCategory(category);
+      const categoryData = getCategoryForProfile(category, profile);
 
       if (!categoryData) {
-        const availableCategories = getAllCategories().map((c) => c.name);
+        const availableCategories = getAllCategoriesForProfile(profile).map((c) => c.name);
+        const globalCategory = getCategory(category);
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify(
                 {
-                  error: `Unknown category: ${category}`,
+                  error: globalCategory
+                    ? `Category ${category} is not available in the ${profile} profile`
+                    : `Unknown category: ${category}`,
                   available_categories: availableCategories,
+                  profile,
                 },
                 null,
                 2,
@@ -97,14 +108,15 @@ export function registerRouterTools(server: McpServer, _callKicadScript: Command
       // Return tool names and basic info
       // Full schema is available via tool introspection once tool is called
       const result = {
+        profile,
         category: categoryData.name,
         description: categoryData.description,
         tool_count: categoryData.tools.length,
         tools: categoryData.tools.map((toolName) => ({
           name: toolName,
-          description: `Use execute_tool with tool_name="${toolName}" to run this tool`,
+          description: `Call ${toolName} directly by name`,
         })),
-        note: "Use execute_tool to run any of these tools with appropriate parameters",
+        note: "These tools are available in the active profile and can be called directly by name with appropriate parameters.",
       };
 
       return {
@@ -130,15 +142,16 @@ export function registerRouterTools(server: McpServer, _callKicadScript: Command
     async ({ query }) => {
       logger.debug(`Searching tools for: ${query}`);
 
-      const matches = registrySearchTools(query);
+      const matches = searchToolsForProfile(query, profile);
 
       const result = {
+        profile,
         query: query,
         count: matches.length,
         matches: matches,
         note:
           matches.length > 0
-            ? "Use execute_tool with the tool name to run it"
+            ? "Call the matching tool directly by name"
             : "No tools found matching your query. Try list_tool_categories to browse all categories.",
       };
 
